@@ -16,6 +16,8 @@ flowvelly-gke-cicd/
 ├── RUNBOOK.md                 # Gate approvals and rollback execution
 └── AI_COMPANION_NOTE.md       # AI utilization critique and gaps corrected
 
+```
+
 
 ## Architectural Assumptions
 
