@@ -17,7 +17,7 @@ flowvelly-gke-cicd/
 └── AI_COMPANION_NOTE.md       # AI utilization critique and gaps corrected
 
 
-## Architectural Assumptions
+# Architectural Assumptions
 
 - GKE clusters named `qa-cluster`, `preprod-cluster`, and `prod-cluster` already exist in the target GCP project.
 - Each environment uses its own Kubernetes namespace (`qa`, `preprod`, `prod`); the pipeline creates these if they don't already exist.
