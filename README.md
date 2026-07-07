@@ -1,11 +1,9 @@
-
-markdown
 # Flowvelly GKE Inference Service CI/CD
 
 This repository provides the deployment pipeline and infrastructure configuration for Flowvelly Healthcare's containerized inference service on Google Kubernetes Engine (GKE).
 
 ## Directory Structure
-text
+```text
 flowvelly-gke-cicd/
 ├── .github/
 │   └── workflows/
@@ -17,6 +15,7 @@ flowvelly-gke-cicd/
 ├── TROUBLESHOOTING.md         # OIDC and principal mapping resolution
 ├── RUNBOOK.md                 # Gate approvals and rollback execution
 └── AI_COMPANION_NOTE.md       # AI utilization critique and gaps corrected
+
 
 ## Architectural Assumptions
 
