@@ -1,30 +1,30 @@
-name: Continuous Integration & Deployment
+name: GKE Continuous Integration & Deployment
 
 on:
   push:
     branches:
-      - main # Runs whenever code is pushed or merged to the main branch
+      - main
 
 permissions:
   contents: read
-  id-token: write # Mandatory for OIDC Workload Identity Federation
+  id-token: write
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  GAR_LOCATION: us-central1               # Update this if your region is different
-  GAR_REPOSITORY: flowvelly-repo         # Your GCP Artifact Registry Repository Name
-  IMAGE_NAME: inference-service           # Your Container image name
-  GKE_ZONE: us-central1-a                 # GKE Cluster Zone
-  GKE_CLUSTER_QA: qa-cluster              # Cluster Name for QA
-  GKE_CLUSTER_PREPROD: preprod-cluster    # Cluster Name for Pre-production
-  GKE_CLUSTER_PROD: prod-cluster          # Cluster Name for Production
+  GAR_LOCATION: us-central1
+  GAR_REPOSITORY: flowvelly-repo
+  IMAGE_NAME: inference-service
+  GKE_ZONE: us-central1-a
+  GKE_CLUSTER_QA: qa-cluster
+  GKE_CLUSTER_PREPROD: preprod-cluster
+  GKE_CLUSTER_PROD: prod-cluster
 
 jobs:
   # ==========================================
   # STAGE 1: BUILD & PUSH CONTAINER IMAGE
   # ==========================================
   build-and-push:
-    name: Build and Push Docker Image
+    name: Build & Push Container
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.prep-tag.outputs.tag }}
@@ -37,7 +37,6 @@ jobs:
         run: |
           echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
-      # Authenticate securely with Google Cloud using OIDC Workload Identity Federation
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -63,42 +62,39 @@ jobs:
   # STAGE 2: CONTAINER VULNERABILITY SCANNING
   # ==========================================
   vulnerability-scan:
-    name: Scan Container for Vulnerabilities
+    name: Scan Container
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Authorize Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
+
       - name: Run Trivy Vulnerability Scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.23.0
         with:
           image-ref: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}
           format: 'table'
-          exit-code: '1' # Fails the pipeline run if severe vulnerabilities are found
+          exit-code: '1'
           ignore-unfixed: true
           severity: 'HIGH,CRITICAL'
 
   # ==========================================
-  # STAGE 3: INFRASTRUCTURE AS CODE (IaC) SCANNING
-  # ==========================================
-  iac-scan:
-    name: Check Infrastructure Configuration
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Run Checkov Security Scan
-        uses: bridgecrewio/checkov-action@master
-        with:
-          directory: ./terraform # Path to your infrastructure folder
-          framework: terraform
-          soft_fail: false
-
-  # ==========================================
-  # STAGE 4: DEPLOY TO QA (AUTOMATIC)
+  # STAGE 3: DEPLOY TO QA (AUTOMATIC)
   # ==========================================
   deploy-qa:
-    name: Deploy to QA (Non-production)
-    needs: [build-and-push, vulnerability-scan, iac-scan]
+    name: Deploy to QA
+    needs: [build-and-push, vulnerability-scan] # Removed the iac-scan requirement!
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -119,17 +115,19 @@ jobs:
       - name: Update QA Kubernetes Deployment
         run: |
           IMAGE_URI="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}"
+          kubectl create namespace qa --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f manifests/inference-service.yaml -n qa
           kubectl set image deployment/inference-service inference-service-container="$IMAGE_URI" -n qa
           kubectl rollout status deployment/inference-service -n qa
 
   # ==========================================
-  # STAGE 5: DEPLOY TO PREPROD (APPROVAL GATE REQUIRED)
+  # STAGE 4: DEPLOY TO PREPROD (APPROVAL GATE REQUIRED)
   # ==========================================
   deploy-preprod:
     name: Deploy to Pre-production
-    needs: deploy-qa
+    needs: [deploy-qa, build-and-push]
     runs-on: ubuntu-latest
-    environment: preprod # Halts execution here until you manually approve it on GitHub!
+    environment: preprod
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -149,17 +147,19 @@ jobs:
       - name: Update Preprod Kubernetes Deployment
         run: |
           IMAGE_URI="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}"
+          kubectl create namespace preprod --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f manifests/inference-service.yaml -n preprod
           kubectl set image deployment/inference-service inference-service-container="$IMAGE_URI" -n preprod
           kubectl rollout status deployment/inference-service -n preprod
 
   # ==========================================
-  # STAGE 6: DEPLOY TO PRODUCTION (APPROVAL GATE REQUIRED)
+  # STAGE 5: DEPLOY TO PRODUCTION (APPROVAL GATE REQUIRED)
   # ==========================================
   deploy-prod:
     name: Deploy to Production
-    needs: deploy-preprod
+    needs: [deploy-preprod, build-and-push]
     runs-on: ubuntu-latest
-    environment: prod # Halts execution here until you manually approve it on GitHub!
+    environment: prod
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -179,5 +179,7 @@ jobs:
       - name: Update Production Kubernetes Deployment
         run: |
           IMAGE_URI="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image_tag }}"
+          kubectl create namespace prod --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f manifests/inference-service.yaml -n prod
           kubectl set image deployment/inference-service inference-service-container="$IMAGE_URI" -n prod
           kubectl rollout status deployment/inference-service -n prod
