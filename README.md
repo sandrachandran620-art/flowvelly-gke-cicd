@@ -1,13 +1,8 @@
 # Flowvelly GKE Inference Service CI/CD
 
-This repository contains the application deployment pipeline and Kubernetes resources for Flowvelly Healthcare's containerized inference service on Google Kubernetes Engine (GKE).
+This repository provides the deployment pipeline and infrastructure configuration for Flowvelly Healthcare's containerized inference service on Google Kubernetes Engine (GKE).
 
----
-
-## 1. Directory Structure & Navigation
-
-This repository separates pipeline automations, target cluster configurations, and setup documentation:
-
+## Directory Structure
 ```text
 flowvelly-gke-cicd/
 ├── .github/
