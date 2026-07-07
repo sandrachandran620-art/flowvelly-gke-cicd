@@ -1,14 +1,15 @@
-# AI Companion Note
+# AI Companion Review Note
 
-### 1. How AI Was Utilized
-AI assistants were leveraged to draft initial GKE Deployment Manifests, Terraform skeleton patterns, and boilerplate GitHub Actions workflow templates. This allowed us to focus effort on policy verification, secure IAM integrations, and change management procedures.
+### Usage Strategy
+AI was utilized to draft GKE Deployment Manifests and GitHub Actions templates to accelerate file composition.
 
-### 2. Shortfalls Corrected
-*  The raw AI-generated templates assumed open internet egress for container building and standard, permanent long-lived `.json` service account credentials. In a locked-down, HIPAA-compliant healthcare estate, open egress is highly restricted, and static private keys represent a major audit risk. I corrected this by implementing Workload Identity Federation (WIF) OIDC token exchanges instead of static keys.
-*  The AI tool suggested leaving the OIDC Attribute Condition text area blank for "easy debugging." I corrected this shortfall after encountering backend validation errors, enforcing structured Common Expression Language (CEL) checks (`assertion.repository.startsWith("sandrachandran620-art/")`) to guarantee that only validated GitHub pipelines can assume our service account.
-*  The AI suggested using the Cloud Console UI to bind the `Subject` to `*`. I caught the console-generated IAM path violation (`/subject/*`) and manually resolved it via the `gcloud` CLI using a valid global resource path pattern.
+### Shortfalls Corrected
+1.  The raw AI-generated templates ran the image scan in a separate job without passing authentication credentials. On private Artifact Registries, this caused scan jobs to fail with unauthorized pull errors. We fixed this by adding explicit GCP OIDC authentication to the scan job.
+2.  The AI workflows referenced `needs.build-and-push.outputs.image_tag` in the `deploy-preprod` and `deploy-prod` jobs, but did not declare `build-and-push` as a dependency in their `needs` list. This resulted in empty image tag resolutions. We fixed this by adding `build-and-push` to the execution dependencies list.
+3.  The AI recommended a raw `kubectl set image` command which fails when deploying to fresh namespaces where the deployment resources do not yet exist. We added namespace creation and manifest initialization steps to ensure deployment success on new GKE namespaces.
 
-### 3. Human Value Add (What the AI Missed)
-The AI missed the strict organizational and security policies required for a protected healthcare environment. I added:
-*  Stripped away generic broad owner/editor permissions and restricted the pipeline service account to GKE Developer, Artifact Registry Writer, and Cloud SQL Client roles.
-*  Configured mandatory environments (`preprod` / `prod`) requiring human validation before any high-environment rollout is triggered.
+### 4. Rollback Environment Gate Trade-off (Human Architectural Decision)
+Our manual rollback workflow (`rollback.yml`) deliberately reuses the same GitHub Environment security configuration for `prod` and `preprod` as the main deployment pipeline.
+
+*  In an active production incident, requiring a manual approval gate slightly delays rollout recovery (the "fast rollback" goal) because an authorized gatekeeper must still click approve on GitHub before the job executes.
+*  In a regulated healthcare environment handling PHI-bordering data, permitting automated, un-audited state modifications on production GKE clusters is a compliance risk. By routing rollbacks through the exact same environment gate, we enforce strict continuous change control, leaving a permanent audit trail showing who approved the rollback, what was reverted, and when the action occurred.
